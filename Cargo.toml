@@ -7,3 +7,12 @@ edition = "2021"
 
 [dependencies]
 rand = "0.8.5"
+
+[dependencies.sdl2]
+version = "0.35.2"
+default-features = false
+features = ["gfx"]
+
+[features]
+default = []
+use_sdl2_mac_framework = ["sdl2/use_mac_framework"]

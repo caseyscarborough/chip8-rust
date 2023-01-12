@@ -10,8 +10,7 @@ const REGISTERS: usize = 16;
 pub const VIDEO_WIDTH: usize = 64;
 pub const VIDEO_HEIGHT: usize = 32;
 const KEY_COUNT: usize = 16;
-const FONTSET_SIZE: usize = 80;
-const FONTSET: [u8; FONTSET_SIZE] = [
+const FONTSET: [u8; 80] = [
     0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
     0x20, 0x60, 0x20, 0x20, 0x70, // 1
     0xF0, 0x10, 0xF0, 0x80, 0xF0, // 2
@@ -31,6 +30,8 @@ const FONTSET: [u8; FONTSET_SIZE] = [
 ];
 
 pub struct Cpu {
+    pub video: [[u8; VIDEO_WIDTH]; VIDEO_HEIGHT],
+    pub draw_flag: bool,
     registers: [u8; REGISTERS],
     memory: [u8; MEMORY_SIZE],
     index: usize,
@@ -40,9 +41,7 @@ pub struct Cpu {
     delay_timer: u8,
     sound_timer: u8,
     opcode: u16,
-    video: [u32; VIDEO_WIDTH * VIDEO_HEIGHT],
     keypad: [u8; KEY_COUNT],
-    draw_flag: bool,
     vx: usize,
     vy: usize,
     kk: u8,
@@ -51,9 +50,13 @@ pub struct Cpu {
 
 impl Cpu {
     pub fn init() -> Self {
+        let mut memory = [0u8; MEMORY_SIZE];
+        for i in 0..FONTSET.len() {
+            memory[i] = FONTSET[i];
+        }
         Cpu {
             registers: [0; REGISTERS],
-            memory: [0u8; MEMORY_SIZE],
+            memory,
             index: 0,
             pc: 0x200,
             stack: [0; STACK_SIZE],
@@ -61,7 +64,7 @@ impl Cpu {
             delay_timer: 0,
             sound_timer: 0,
             opcode: 0,
-            video: [0; VIDEO_WIDTH * VIDEO_HEIGHT],
+            video: [[0u8; VIDEO_WIDTH]; VIDEO_HEIGHT],
             keypad: [0; KEY_COUNT],
             draw_flag: false,
             vx: 0,
@@ -99,7 +102,8 @@ impl Cpu {
         return true;
     }
 
-    pub fn cycle(&mut self) {
+    pub fn cycle(&mut self, keypad: [u8; KEY_COUNT]) {
+        self.keypad = keypad;
         self.opcode = (((self.memory[self.pc] as u16) << 8) | (self.memory[self.pc + 1] as u16));
         self.pc += 2;
         self.vx = self.get_vx();
@@ -168,24 +172,28 @@ impl Cpu {
     }
 
     fn get_vx(&mut self) -> usize {
-        return (self.opcode & 0x0F00 >> 8) as usize;
+        ((self.opcode & 0x0F00) >> 8 as u8) as usize
     }
 
     fn get_vy(&mut self) -> usize {
-        return (self.opcode & 0x00F0 >> 4) as usize;
+        ((self.opcode & 0x00F0) >> 4 as u8) as usize
     }
 
     fn get_kk(&mut self) -> u8 {
-        return (self.opcode & 0x00FF) as u8;
+        (self.opcode & 0x00FF) as u8
     }
 
     fn get_nnn(&mut self) -> usize {
-        return (self.opcode & 0x0FFF) as usize;
+        (self.opcode & 0x0FFF) as usize
     }
 
     // clear the display
     fn op_00e0(&mut self) {
-        self.video.iter_mut().for_each(|m| *m = 0);
+        for x in 0..VIDEO_WIDTH {
+            for y in 0..VIDEO_HEIGHT {
+                self.video[x][y] = 0;
+            }
+        }
         self.draw_flag = true;
     }
 
@@ -249,49 +257,41 @@ impl Cpu {
     }
 
     fn op_8xy4(&mut self) {
-        let vx = self.vx;
-        let vy = self.vy;
-        let sum = self.registers[vx] + self.registers[vy];
+        let sum = self.registers[self.vx] as u16 + self.registers[self.vy] as u16;
         self.registers[0xF] = if sum > 255 {
             1
         } else {
             0
         };
-        self.registers[vx] = sum & 0xFF;
+        self.registers[self.vx] = (sum & 0xFF) as u8;
     }
 
     fn op_8xy5(&mut self) {
-        let vx = self.vx;
-        let vy = self.vy;
-        self.registers[0xF] = if self.registers[vy] > self.registers[vx] {
+        self.registers[0xF] = if self.registers[self.vy] > self.registers[self.vx] {
             0
         } else {
             1
         };
-        self.registers[vx] -= self.registers[vy];
+        self.registers[self.vx] = self.registers[self.vx].wrapping_sub(self.registers[self.vy]);
     }
 
     fn op_8xy6(&mut self) {
-        let vx = self.vx;
-        self.registers[0xF] = self.registers[vx] & 0x1;
-        self.registers[vx] >>= 1;
+        self.registers[0xF] = self.registers[self.vx] & 0x1;
+        self.registers[self.vx] >>= 1;
     }
 
     fn op_8xy7(&mut self) {
-        let vx = self.vx;
-        let vy = self.vy;
-        self.registers[0xF] = if self.registers[vy] > self.registers[vx] {
+        self.registers[0xF] = if self.registers[self.vy] > self.registers[self.vx] {
             1
         } else {
             0
         };
-        self.registers[vx] = self.registers[vy] - self.registers[vx];
+        self.registers[self.vx] = self.registers[self.vy] - self.registers[self.vx];
     }
 
     fn op_8xye(&mut self) {
-        let vx = self.vx;
-        self.registers[0xF] = (self.registers[vx] & 0x80) >> 7;
-        self.registers[vx] <<= 1;
+        self.registers[0xF] = (self.registers[self.vx] & 0x80) >> 7;
+        self.registers[self.vx] <<= 1;
     }
 
     fn op_9xy0(&mut self) {
@@ -314,29 +314,21 @@ impl Cpu {
     }
 
     fn op_dxyn(&mut self) {
-        let x = (self.registers[self.vx] % VIDEO_WIDTH as u8) as u16;
-        let y = (self.registers[self.vy] % VIDEO_HEIGHT as u8) as u16;
-        let height = self.opcode & 0x000F;
         self.registers[0xF] = 0;
-        for row in 0..height {
-            let byte = self.memory[self.index + (row as usize)];
-            for col in 0..8 {
-                let sprite_pixel = byte & (0x80 >> col);
-                let loc = ((y + row) * (VIDEO_WIDTH as u16) + (x + col)) as usize;
-                let screen_pixel = self.video[loc];
-                if sprite_pixel != 0 {
-                    if screen_pixel == 1 {
-                        self.registers[0xF] = 1;
-                    }
-                    self.video[loc] ^= 1;
-                }
+        for byte in 0..(self.opcode & 0x000F) {
+            let y = (self.registers[self.vy] as usize + byte as usize) % VIDEO_HEIGHT;
+            for bit in 0..8 {
+                let x = (self.registers[self.vx] as usize + bit) % VIDEO_WIDTH;
+                let color = (self.memory[self.index + byte as usize] >> (7 - bit)) & 1;
+                self.registers[0xF] |= color & self.video[y][x];
+                self.video[y][x] ^= color;
             }
         }
         self.draw_flag = true;
     }
 
     fn op_ex9e(&mut self) {
-        if self.keypad[self.registers[self.vx] as usize] != 0 {
+        if self.keypad[self.registers[self.vx] as usize] > 0 {
             self.pc += 2;
         }
     }
@@ -352,10 +344,9 @@ impl Cpu {
     }
 
     fn op_fx0a(&mut self) {
-        let vx = self.vx;
         for i in 0..16 {
             if self.keypad[i] != 0 {
-                self.registers[vx] = i as u8;
+                self.registers[self.vx] = i as u8;
                 return;
             }
         }
@@ -371,13 +362,12 @@ impl Cpu {
     }
 
     fn op_fx1e(&mut self) {
-        let vx = self.vx;
-        self.registers[0xF] = if self.index + (self.registers[vx] as usize) > 0xFFF {
+        self.registers[0xF] = if self.index + (self.registers[self.vx] as usize) > 0xFFF {
             1
         } else {
             0
         };
-        self.index += self.registers[vx] as usize;
+        self.index += self.registers[self.vx] as usize;
     }
 
     fn op_fx29(&mut self) {
@@ -394,19 +384,17 @@ impl Cpu {
     }
 
     fn op_fx55(&mut self) {
-        let vx = self.vx;
-        for i in 0..vx {
+        for i in 0..self.vx {
             self.memory[self.index + i] = self.registers[i];
         }
-        self.index = (vx as usize) + 1;
+        self.index = (self.vx as usize) + 1;
     }
 
     fn op_fx65(&mut self) {
-        let vx = self.vx;
-        for i in 0..vx {
+        for i in 0..self.vx {
             self.registers[i] = self.memory[self.index + i];
         }
-        self.index = (vx as usize) + 1;
+        self.index = (self.vx as usize) + 1;
     }
 
     fn op_null(&mut self) {
