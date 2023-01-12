@@ -111,7 +111,6 @@ impl Cpu {
         self.kk = self.get_kk();
         self.nnn = self.get_nnn();
 
-        println!("Reading instruction {:#06x}", self.opcode);
         match self.opcode & 0xF000 {
             0x0000 => match self.opcode & 0x000F {
                 0x0000 => self.op_00e0(),
