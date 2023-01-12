@@ -7,8 +7,8 @@ use std::process::exit;
 const MEMORY_SIZE: usize = 4096;
 const STACK_SIZE: usize = 16;
 const REGISTERS: usize = 16;
-const VIDEO_WIDTH: usize = 64;
-const VIDEO_HEIGHT: usize = 32;
+pub const VIDEO_WIDTH: usize = 64;
+pub const VIDEO_HEIGHT: usize = 32;
 const KEY_COUNT: usize = 16;
 const FONTSET_SIZE: usize = 80;
 const FONTSET: [u8; FONTSET_SIZE] = [
@@ -31,7 +31,7 @@ const FONTSET: [u8; FONTSET_SIZE] = [
 ];
 
 pub struct Cpu {
-    registers: [u8; STACK_SIZE],
+    registers: [u8; REGISTERS],
     memory: [u8; MEMORY_SIZE],
     index: usize,
     pc: usize,
@@ -43,6 +43,10 @@ pub struct Cpu {
     video: [u32; VIDEO_WIDTH * VIDEO_HEIGHT],
     keypad: [u8; KEY_COUNT],
     draw_flag: bool,
+    vx: usize,
+    vy: usize,
+    kk: u8,
+    nnn: usize,
 }
 
 impl Cpu {
@@ -60,6 +64,10 @@ impl Cpu {
             video: [0; VIDEO_WIDTH * VIDEO_HEIGHT],
             keypad: [0; KEY_COUNT],
             draw_flag: false,
+            vx: 0,
+            vy: 0,
+            kk: 0,
+            nnn: 0,
         }
     }
 
@@ -94,6 +102,10 @@ impl Cpu {
     pub fn cycle(&mut self) {
         self.opcode = (((self.memory[self.pc] as u16) << 8) | (self.memory[self.pc + 1] as u16));
         self.pc += 2;
+        self.vx = self.get_vx();
+        self.vy = self.get_vy();
+        self.kk = self.get_kk();
+        self.nnn = self.get_nnn();
 
         println!("Reading instruction {:#06x}", self.opcode);
         match self.opcode & 0xF000 {
@@ -155,108 +167,248 @@ impl Cpu {
         }
     }
 
+    fn get_vx(&mut self) -> usize {
+        return (self.opcode & 0x0F00 >> 8) as usize;
+    }
+
+    fn get_vy(&mut self) -> usize {
+        return (self.opcode & 0x00F0 >> 4) as usize;
+    }
+
+    fn get_kk(&mut self) -> u8 {
+        return (self.opcode & 0x00FF) as u8;
+    }
+
+    fn get_nnn(&mut self) -> usize {
+        return (self.opcode & 0x0FFF) as usize;
+    }
+
+    // clear the display
     fn op_00e0(&mut self) {
-        println!("Executing op_00e0 for opcode {:#06x}", self.opcode);
+        self.video.iter_mut().for_each(|m| *m = 0);
+        self.draw_flag = true;
     }
+
+    // return from subroutine
     fn op_00ee(&mut self) {
-        println!("Executing op_00ee for opcode {:#06x}", self.opcode);
+        self.sp -= 1;
+        self.pc = self.stack[self.sp];
     }
+
     fn op_1nnn(&mut self) {
-        println!("Executing op_1nnn for opcode {:#06x}", self.opcode);
+        self.pc = self.nnn;
     }
+
     fn op_2nnn(&mut self) {
-        println!("Executing op_2nnn for opcode {:#06x}", self.opcode);
+        self.stack[self.sp] = self.pc;
+        self.sp += 1;
+        self.pc = self.nnn;
     }
+
     fn op_3xkk(&mut self) {
-        println!("Executing op_3xkk for opcode {:#06x}", self.opcode);
+        if self.registers[self.vx] == self.kk {
+            self.pc += 2;
+        }
     }
+
     fn op_4xkk(&mut self) {
-        println!("Executing op_4xkk for opcode {:#06x}", self.opcode);
+        if self.registers[self.vx] != self.kk {
+            self.pc += 2;
+        }
     }
+
     fn op_5xy0(&mut self) {
-        println!("Executing op_5xy0 for opcode {:#06x}", self.opcode);
+        if self.registers[self.vx] == self.registers[self.vy] {
+            self.pc += 2;
+        }
     }
+
     fn op_6xkk(&mut self) {
-        println!("Executing op_6xkk for opcode {:#06x}", self.opcode);
+        self.registers[self.vx] = self.kk;
     }
+
     fn op_7xkk(&mut self) {
-        println!("Executing op_7xkk for opcode {:#06x}", self.opcode);
+        let result = self.registers[self.vx] as u16 + self.kk as u16;
+        self.registers[self.vx] = result as u8;
     }
+
     fn op_8xy0(&mut self) {
-        println!("Executing op_8xy0 for opcode {:#06x}", self.opcode);
+        self.registers[self.vx] = self.registers[self.vy];
     }
+
     fn op_8xy1(&mut self) {
-        println!("Executing op_8xy1 for opcode {:#06x}", self.opcode);
+        self.registers[self.vx] |= self.registers[self.vy];
     }
+
     fn op_8xy2(&mut self) {
-        println!("Executing op_8xy2 for opcode {:#06x}", self.opcode);
+        self.registers[self.vx] &= self.registers[self.vy];
     }
+
     fn op_8xy3(&mut self) {
-        println!("Executing op_8xy3 for opcode {:#06x}", self.opcode);
+        self.registers[self.vx] ^= self.registers[self.vy];
     }
+
     fn op_8xy4(&mut self) {
-        println!("Executing op_8xy4 for opcode {:#06x}", self.opcode);
+        let vx = self.vx;
+        let vy = self.vy;
+        let sum = self.registers[vx] + self.registers[vy];
+        self.registers[0xF] = if sum > 255 {
+            1
+        } else {
+            0
+        };
+        self.registers[vx] = sum & 0xFF;
     }
+
     fn op_8xy5(&mut self) {
-        println!("Executing op_8xy5 for opcode {:#06x}", self.opcode);
+        let vx = self.vx;
+        let vy = self.vy;
+        self.registers[0xF] = if self.registers[vy] > self.registers[vx] {
+            0
+        } else {
+            1
+        };
+        self.registers[vx] -= self.registers[vy];
     }
+
     fn op_8xy6(&mut self) {
-        println!("Executing op_8xy6 for opcode {:#06x}", self.opcode);
+        let vx = self.vx;
+        self.registers[0xF] = self.registers[vx] & 0x1;
+        self.registers[vx] >>= 1;
     }
+
     fn op_8xy7(&mut self) {
-        println!("Executing op_8xy7 for opcode {:#06x}", self.opcode);
+        let vx = self.vx;
+        let vy = self.vy;
+        self.registers[0xF] = if self.registers[vy] > self.registers[vx] {
+            1
+        } else {
+            0
+        };
+        self.registers[vx] = self.registers[vy] - self.registers[vx];
     }
+
     fn op_8xye(&mut self) {
-        println!("Executing op_8xye for opcode {:#06x}", self.opcode);
+        let vx = self.vx;
+        self.registers[0xF] = (self.registers[vx] & 0x80) >> 7;
+        self.registers[vx] <<= 1;
     }
+
     fn op_9xy0(&mut self) {
-        println!("Executing op_9xy0 for opcode {:#06x}", self.opcode);
+        if self.registers[self.vx] != self.registers[self.vy] {
+            self.pc += 2;
+        }
     }
+
     fn op_annn(&mut self) {
-        println!("Executing op_annn for opcode {:#06x}", self.opcode);
+        self.index = self.nnn;
     }
+
     fn op_bnnn(&mut self) {
-        println!("Executing op_bnnn for opcode {:#06x}", self.opcode);
+        self.pc = (self.registers[0] as usize) + self.nnn;
     }
+
     fn op_cxkk(&mut self) {
-        println!("Executing op_cxkk for opcode {:#06x}", self.opcode);
+        let mut rng = rand::thread_rng();
+        self.registers[self.vx] = rng.gen::<u8>() & self.kk;
     }
+
     fn op_dxyn(&mut self) {
-        println!("Executing op_dxyn for opcode {:#06x}", self.opcode);
+        let x = (self.registers[self.vx] % VIDEO_WIDTH as u8) as u16;
+        let y = (self.registers[self.vy] % VIDEO_HEIGHT as u8) as u16;
+        let height = self.opcode & 0x000F;
+        self.registers[0xF] = 0;
+        for row in 0..height {
+            let byte = self.memory[self.index + (row as usize)];
+            for col in 0..8 {
+                let sprite_pixel = byte & (0x80 >> col);
+                let loc = ((y + row) * (VIDEO_WIDTH as u16) + (x + col)) as usize;
+                let screen_pixel = self.video[loc];
+                if sprite_pixel != 0 {
+                    if screen_pixel == 1 {
+                        self.registers[0xF] = 1;
+                    }
+                    self.video[loc] ^= 1;
+                }
+            }
+        }
+        self.draw_flag = true;
     }
+
     fn op_ex9e(&mut self) {
-        println!("Executing op_ex9e for opcode {:#06x}", self.opcode);
+        if self.keypad[self.registers[self.vx] as usize] != 0 {
+            self.pc += 2;
+        }
     }
+
     fn op_exa1(&mut self) {
-        println!("Executing op_exa1 for opcode {:#06x}", self.opcode);
+        if self.keypad[self.registers[self.vx] as usize] == 0 {
+            self.pc += 2;
+        }
     }
+
     fn op_fx07(&mut self) {
-        println!("Executing op_fx07 for opcode {:#06x}", self.opcode);
+        self.registers[self.vx] = self.delay_timer;
     }
+
     fn op_fx0a(&mut self) {
-        println!("Executing op_fx0a for opcode {:#06x}", self.opcode);
+        let vx = self.vx;
+        for i in 0..16 {
+            if self.keypad[i] != 0 {
+                self.registers[vx] = i as u8;
+                return;
+            }
+        }
+        self.pc -= 2;
     }
+
     fn op_fx15(&mut self) {
-        println!("Executing op_fx15 for opcode {:#06x}", self.opcode);
+        self.delay_timer = self.registers[self.vx];
     }
+
     fn op_fx18(&mut self) {
-        println!("Executing op_fx18 for opcode {:#06x}", self.opcode);
+        self.sound_timer = self.registers[self.vx];
     }
+
     fn op_fx1e(&mut self) {
-        println!("Executing op_fx1e for opcode {:#06x}", self.opcode);
+        let vx = self.vx;
+        self.registers[0xF] = if self.index + (self.registers[vx] as usize) > 0xFFF {
+            1
+        } else {
+            0
+        };
+        self.index += self.registers[vx] as usize;
     }
+
     fn op_fx29(&mut self) {
-        println!("Executing op_fx29 for opcode {:#06x}", self.opcode);
+        self.index = 5 * self.registers[self.vx] as usize;
     }
+
     fn op_fx33(&mut self) {
-        println!("Executing op_fx33 for opcode {:#06x}", self.opcode);
+        let mut value = self.registers[self.vx];
+        self.memory[self.index + 2] = value % 10;
+        value /= 10;
+        self.memory[self.index + 1] = value % 10;
+        value /= 10;
+        self.memory[self.index] = value % 10;
     }
+
     fn op_fx55(&mut self) {
-        println!("Executing op_fx55 for opcode {:#06x}", self.opcode);
+        let vx = self.vx;
+        for i in 0..vx {
+            self.memory[self.index + i] = self.registers[i];
+        }
+        self.index = (vx as usize) + 1;
     }
+
     fn op_fx65(&mut self) {
-        println!("Executing op_fx65 for opcode {:#06x}", self.opcode);
+        let vx = self.vx;
+        for i in 0..vx {
+            self.registers[i] = self.memory[self.index + i];
+        }
+        self.index = (vx as usize) + 1;
     }
+
     fn op_null(&mut self) {
         eprintln!("Unknown opcode {:#06x}", self.opcode);
         exit(1)
