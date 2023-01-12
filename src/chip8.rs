@@ -191,7 +191,7 @@ impl Cpu {
     fn op_00e0(&mut self) {
         for x in 0..VIDEO_WIDTH {
             for y in 0..VIDEO_HEIGHT {
-                self.video[x][y] = 0;
+                self.video[y][x] = 0;
             }
         }
         self.draw_flag = true;
@@ -384,14 +384,14 @@ impl Cpu {
     }
 
     fn op_fx55(&mut self) {
-        for i in 0..self.vx {
+        for i in 0..=self.vx {
             self.memory[self.index + i] = self.registers[i];
         }
         self.index = (self.vx as usize) + 1;
     }
 
     fn op_fx65(&mut self) {
-        for i in 0..self.vx {
+        for i in 0..=self.vx {
             self.registers[i] = self.memory[self.index + i];
         }
         self.index = (self.vx as usize) + 1;
