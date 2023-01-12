@@ -4,6 +4,8 @@ This is an implementation of a Chip-8 Emulator in Rust.
 
 It is a direct port of the C++ implementation [here](https://gitlab.casey.sh/casey/chip8).
 
+![](https://i.imgur.com/OXQ6fMs.png)
+
 ## Requirements
 
 - Rust
