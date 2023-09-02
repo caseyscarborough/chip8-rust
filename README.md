@@ -30,4 +30,4 @@ cargo run 20 1 Test-Opcodes.ch8
 ## References
 
 - [starrhorne/chip8-rust](https://github.com/starrhorne/chip8-rust)
-- [casey/chip8](https://gitlab.casey.sh/casey/chip8)
+- [caseyscarborough/chip8-cpp](https://github.com/caseyscarborough/chip8-cpp)
